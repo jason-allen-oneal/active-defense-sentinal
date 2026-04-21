@@ -1,7 +1,7 @@
 ---
 name: active-defense-sentinal
 description: Defensive triage skill for OpenClaw, Hermes Agent, host integrity, and OpenClaw skill-supply-chain scanning. Detects prompt injection, session drift, context overflow, host anomalies, and unsafe skills while keeping actions bounded and auditable.
-version: 0.2.0
+version: 0.3.0
 author: Hermes Agent
 tags: [openclaw, hermes, security, defense, triage, host, integrity, skill-scanner]
 ---
@@ -82,6 +82,15 @@ Always keep:
 - severity summary
 - timestamp
 - action taken
+
+## Executable helper scripts
+The repository includes wrappers that implement the scanner workflow end to end:
+- `scripts/scan_openclaw_skills.sh` - scan a single skill path, or scan the active tree when no path is provided
+- `scripts/scan_and_add_skill.sh` - scan a local skill folder and install it into the active tree when safe
+- `scripts/clawhub_scan_install.sh` - stage-install a ClawHub skill, scan it, then optionally apply it to the active tree
+- `scripts/auto_scan_user_skills.sh` - bulk scan the active OpenClaw skill tree
+
+These wrappers delegate to `scripts/sentinal.py`, which handles report generation, severity parsing, safe installation, and quarantine plumbing.
 
 ## Quarantine policy
 Quarantine is a containment action, not a cleanup action.

@@ -21,6 +21,7 @@ It is designed to:
 
 ## What’s included
 - `SKILL.md` - publishable skill specification
+- `scripts/` - executable helpers for scanning, staged installs, and quarantine
 - `references/` - policy, workflow, quarantine, and adapter notes
 - `examples/` - sample incident flows and outputs
 
@@ -50,4 +51,4 @@ Before publishing to clawhub.ai:
 4. Publish the skill package with the repo-ready description in `PUBLISHING.md`.
 
 ## Status
-This repository is ready as a releaseable documentation package and scaffold for clawhub.ai publication.
+This repository is ready as a releasable documentation package and scaffold for clawhub.ai publication.

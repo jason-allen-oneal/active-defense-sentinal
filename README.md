@@ -21,6 +21,7 @@ It is designed to:
 
 ## What’s included
 - `SKILL.md` - publishable skill specification
+- `scripts/` - executable helpers for scanning, staged installs, and quarantine
 - `references/` - policy, workflow, quarantine, and adapter notes
 - `examples/` - sample incident flows and outputs
 

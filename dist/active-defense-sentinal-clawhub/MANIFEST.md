@@ -6,6 +6,7 @@ Included files:
 - PUBLISHING.md
 - CHANGELOG.md
 - RELEASE_NOTES.md
+- scripts/*
 - references/*
 - examples/*
 
