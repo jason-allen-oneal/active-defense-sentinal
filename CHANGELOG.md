@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 - 2026-04-21
+## 0.4.0 - 2026-04-21
 
 ### Added
 - OpenClaw adapter for UI, gateway, session, and context-health checks
@@ -8,7 +8,7 @@
 - Host adapter for bounded local defensive telemetry
 - Skill scanner adapter for OpenClaw skill-supply-chain scanning
 - Explicit scan workflow and quarantine policy docs
-- Executable helper scripts for local scanning, staged installs, and quarantine
+- Executable helper scripts for local scanning, staged installs, quarantine, and adapter health checks
 - Publication-ready README and clawhub.ai listing copy
 
 ### Safety notes

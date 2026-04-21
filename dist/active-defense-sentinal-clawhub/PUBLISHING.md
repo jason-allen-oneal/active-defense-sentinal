@@ -17,7 +17,7 @@ It helps with:
 - OpenClaw skill-supply-chain scanning before install or activation
 - quarantine handling for already-installed skills when policy allows it
 
-The skill is designed to preserve evidence, avoid silent remediation, and separate verified facts from suspicion before recommending the safest next step. The package now includes executable helper scripts for local scanning, staged ClawHub installs, and quarantine workflows.
+The skill is designed to preserve evidence, avoid silent remediation, and separate verified facts from suspicion before recommending the safest next step. The package now includes executable helper scripts for local scanning, staged ClawHub installs, quarantine workflows, and adapter health checks.
 
 ## Suggested tags
 openclaw, hermes, security, defense, triage, host, integrity, skill-scanner

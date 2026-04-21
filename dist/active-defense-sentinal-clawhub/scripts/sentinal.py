@@ -3,13 +3,18 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import getpass
+import json
 import os
+import platform
 import re
 import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 SEVERITY_ORDER = ["Critical", "High", "Medium", "Low", "Info"]
@@ -230,6 +235,38 @@ def print_result(target: Path, report_path: Path, counts: dict[str, int], verdic
     print(f"Verdict: {verdict}")
 
 
+def emit_bullets(title: str, items: list[str]) -> None:
+    print(f"{title}:")
+    if not items:
+        print("- none")
+        return
+    for item in items:
+        print(f"- {item}")
+
+
+def emit_report(verified: list[str], suspected: list[str], unknown: list[str], next_step: str) -> None:
+    emit_bullets("What is verified", verified)
+    emit_bullets("What is suspected", suspected)
+    emit_bullets("What is unknown", unknown)
+    print("Recommended next step:")
+    print(f"- {next_step}")
+
+
+def fetch_json(url: str, timeout: float = 2.0) -> dict | None:
+    request = urllib.request.Request(url, headers={"User-Agent": "sentinal/0.4.0"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = response.read().decode("utf-8", errors="replace")
+        return json.loads(payload)
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError, json.JSONDecodeError):
+        return None
+
+
+def run_capture(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
+    print("+", shlex.join(cmd))
+    return subprocess.run(cmd, cwd=str(cwd) if cwd else None, capture_output=True, text=True)
+
+
 def cmd_scan(args: argparse.Namespace) -> int:
     source = Path(args.path).expanduser().resolve()
     if not source.exists():
@@ -317,6 +354,147 @@ def cmd_quarantine(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_openclaw_health(args: argparse.Namespace) -> int:
+    endpoint = args.endpoint or os.environ.get("OPENCLAW_CDP_URL", "http://127.0.0.1:9223")
+    endpoint = endpoint.rstrip("/")
+    version_url = endpoint if endpoint.endswith("/json/version") else f"{endpoint}/json/version"
+    targets_url = endpoint if endpoint.endswith("/json/list") else f"{endpoint}/json/list"
+
+    version = fetch_json(version_url)
+    targets = fetch_json(targets_url) or []
+
+    if version is None:
+        emit_report(
+            verified=[],
+            suspected=[f"OpenClaw browser bridge is not reachable at {version_url}"],
+            unknown=["Whether the browser session is available or healthy"],
+            next_step="Start or reconnect the Chrome/Bridge session, then re-run the check.",
+        )
+        return 2
+
+    browser_label = version.get("Browser") or version.get("Protocol-Version") or "unknown browser"
+    websocket = version.get("webSocketDebuggerUrl") or "not exposed"
+    verified = [
+        f"OpenClaw browser bridge is reachable at {version_url}",
+        f"Browser: {browser_label}",
+        f"Targets reported: {len(targets)}",
+        f"WebSocket debugger URL: {websocket}",
+    ]
+    suspected = []
+    if len(targets) == 0:
+        suspected.append("No active tabs were reported by the browser bridge")
+    unknown = ["Session poisoning and task-specific context health cannot be proven from the bridge alone"]
+    emit_report(
+        verified=verified,
+        suspected=suspected,
+        unknown=unknown,
+        next_step="If the bridge looks healthy but a task is misbehaving, start a fresh browser session and abandon the poisoned thread.",
+    )
+    return 1 if suspected else 0
+
+
+def cmd_hermes_health(args: argparse.Namespace) -> int:
+    hermes_home = Path(args.hermes_home).expanduser()
+    critical: list[str] = []
+    suspected: list[str] = []
+    verified: list[str] = []
+    unknown: list[str] = []
+
+    if hermes_home.exists():
+        verified.append(f"Hermes home exists: {hermes_home}")
+    else:
+        critical.append(f"Hermes home is missing: {hermes_home}")
+
+    for rel in ["skills", "memory"]:
+        path = hermes_home / rel
+        if path.exists():
+            verified.append(f"Present: {path}")
+        else:
+            suspected.append(f"Missing expected Hermes directory: {path}")
+
+    for rel in ["config.yaml", "google_token.json"]:
+        path = hermes_home / rel
+        if path.exists():
+            verified.append(f"Present: {path}")
+        else:
+            suspected.append(f"Missing optional Hermes file: {path}")
+
+    tools = ["git", "gh", "python3"]
+    for tool in tools:
+        found = shutil.which(tool)
+        if found:
+            verified.append(f"Tool available: {tool} -> {found}")
+        else:
+            critical.append(f"Tool not found on PATH: {tool}")
+
+    unknown.append("Cron/background job state is not inspected here; use a dedicated scheduler check if needed")
+    unknown.append("MCP gateway health is not directly verified by this local file check")
+
+    emit_report(
+        verified=verified,
+        suspected=suspected + critical,
+        unknown=unknown,
+        next_step="If critical Hermes files or tools are missing, restore them before trusting the session; otherwise continue in a clean session.",
+    )
+    return 2 if critical else (1 if suspected else 0)
+
+
+def cmd_host_guard(args: argparse.Namespace) -> int:
+    verified: list[str] = []
+    suspected: list[str] = []
+    unknown: list[str] = []
+
+    verified.extend([
+        f"Host: {platform.system()} {platform.release()} ({platform.machine()})",
+        f"User: {getpass.getuser()}",
+        f"Python: {sys.version.split()[0]}",
+    ])
+
+    ps_cmd = ["ps", "-eo", "pid,ppid,user,comm,args", "--sort=-%cpu"]
+    ps_result = run_capture(ps_cmd)
+    if ps_result.returncode == 0 and ps_result.stdout:
+        lines = ps_result.stdout.splitlines()
+        verified.append(f"Process snapshot captured ({max(len(lines) - 1, 0)} rows)")
+        for line in lines[1:6]:
+            verified.append(f"ps: {line.strip()}")
+    else:
+        suspected.append("Could not capture process snapshot with ps")
+
+    listener_cmd: list[str] | None = None
+    if shutil.which("ss"):
+        listener_cmd = ["ss", "-ltnp"]
+    elif shutil.which("netstat"):
+        listener_cmd = ["netstat", "-ltnp"]
+
+    if listener_cmd:
+        listener_result = run_capture(listener_cmd)
+        if listener_result.returncode == 0 and listener_result.stdout:
+            lines = [line for line in listener_result.stdout.splitlines() if line.strip()]
+            verified.append(f"Listener snapshot captured ({len(lines)} lines)")
+            for line in lines[1:6]:
+                verified.append(f"listener: {line.strip()}")
+        else:
+            suspected.append("Could not capture listening sockets")
+    else:
+        unknown.append("No ss/netstat binary available to inspect listening sockets")
+
+    disk_cmd = ["df", "-h", "/"]
+    disk_result = run_capture(disk_cmd)
+    if disk_result.returncode == 0 and disk_result.stdout:
+        for line in disk_result.stdout.splitlines()[1:2]:
+            verified.append(f"root disk: {line.strip()}")
+    else:
+        unknown.append("Could not read root filesystem usage")
+
+    emit_report(
+        verified=verified,
+        suspected=suspected,
+        unknown=unknown,
+        next_step="Review any unexpected listeners or privileged processes before changing the host.",
+    )
+    return 1 if suspected else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Active Defense Sentinal helper")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -377,6 +555,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_quarantine.add_argument("path", help="Installed skill directory to quarantine")
     p_quarantine.add_argument("--force", action="store_true", help="Replace an existing quarantine destination")
     p_quarantine.set_defaults(func=cmd_quarantine)
+
+    p_openclaw = sub.add_parser("openclaw-health", help="Check the OpenClaw browser bridge and active tab surface")
+    p_openclaw.add_argument(
+        "--endpoint",
+        help="Browser bridge base URL (default: OPENCLAW_CDP_URL or http://127.0.0.1:9223)",
+    )
+    p_openclaw.set_defaults(func=cmd_openclaw_health)
+
+    p_hermes = sub.add_parser("hermes-health", help="Check Hermes runtime directories and core tools")
+    p_hermes.add_argument(
+        "--hermes-home",
+        default=str(Path.home() / ".hermes"),
+        help="Hermes home directory (default: ~/.hermes)",
+    )
+    p_hermes.set_defaults(func=cmd_hermes_health)
+
+    p_host = sub.add_parser("host-guard", help="Capture local host telemetry for triage")
+    p_host.set_defaults(func=cmd_host_guard)
 
     return parser
 
